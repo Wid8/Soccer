@@ -4,6 +4,27 @@ const cron = require('node-cron');
 const fs = require('fs-extra');
 const path = require('path');
 const pino = require('pino');
+const http = require('http');
+
+// שרת HTTP פשוט להצגת QR
+let currentQR = null;
+http.createServer((req, res) => {
+  if (currentQR) {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(`
+      <html><body style="text-align:center;padding:40px">
+      <h2>סרוק עם וואטסאפ</h2>
+      <img src="https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(currentQR)}" />
+      <p>רענן את הדף אם פג תוקף</p>
+      </body></html>
+    `);
+  } else {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end('<html><body><h2>✅ הבוט מחובר!</h2></body></html>');
+  }
+}).listen(process.env.PORT || 3000, () => {
+  console.log('🌐 פתח את כתובת ה-URL של Render לסריקת QR');
+});
 
 // ==================== הגדרות ====================
 const GROUP_NAME = 'כדורגל ימי ג\' בהוד"ש ⚽';
@@ -82,8 +103,9 @@ async function connectToWhatsApp() {
     const { connection, lastDisconnect, qr } = update;
 
     if (qr) {
-      console.log('\n📱 סרוק את הקוד הבא עם הוואטסאפ שלך:\n');
-      qrcode.generate(qr, { small: true });
+      currentQR = qr;
+      console.log('📱 פתח את כתובת ה-URL של Render וסרוק את ה-QR מהדפדפן!');
+
     }
 
     if (connection === 'close') {
