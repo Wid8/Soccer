@@ -1,19 +1,16 @@
 {
   "name": "football-bot",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "בוט תזכורת תשלום לכדורגל ימי ג'",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
-    "stop": "node index.js stop",
-    "status": "node index.js status",
-    "test-tuesday": "node index.js test-tuesday",
-    "test-reminder": "node index.js test-reminder"
+    "start": "node index.js"
   },
   "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.9",
     "fs-extra": "^11.2.0",
     "node-cron": "^3.0.3",
-    "qrcode-terminal": "^0.12.0",
-    "whatsapp-web.js": "^1.23.0"
+    "pino": "^9.0.0",
+    "qrcode-terminal": "^0.12.0"
   }
 }

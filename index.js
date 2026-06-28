@@ -1,14 +1,16 @@
-const { Client, LocalAuth } = require('whatsapp-web.js');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
 const cron = require('node-cron');
 const fs = require('fs-extra');
 const path = require('path');
+const pino = require('pino');
 
 // ==================== הגדרות ====================
 const GROUP_NAME = 'כדורגל ימי ג\' בהוד"ש ⚽';
 const PAYBOX_LINK = 'https://links.payboxapp.com/5B58fGzSKUb';
 const PAYMENT_AMOUNT = '30';
 const DATA_FILE = path.join(__dirname, 'data.json');
+const AUTH_FOLDER = path.join(__dirname, 'auth_info');
 
 const REGULARS = [
   'אייל קרוואני', 'אסף', 'אורן', 'דורון', 'תומר לבון',
@@ -20,11 +22,9 @@ const REGULARS = [
 // ==================== ניהול נתונים ====================
 function loadData() {
   try {
-    if (fs.existsSync(DATA_FILE)) {
-      return fs.readJsonSync(DATA_FILE);
-    }
+    if (fs.existsSync(DATA_FILE)) return fs.readJsonSync(DATA_FILE);
   } catch (e) {}
-  return { pendingPayments: [], active: false, lastGameDate: null };
+  return { pendingPayments: [], active: false, groupId: null };
 }
 
 function saveData(data) {
@@ -32,25 +32,16 @@ function saveData(data) {
 }
 
 // ==================== עיבוד רשימה ====================
-function extractNonRegularsFromMessage(text) {
+function extractNonRegulars(text) {
   const lines = text.split('\n');
   const allPlayers = [];
-
   for (const line of lines) {
     const match = line.match(/^\d+\.\s*(.+)/);
-    if (match) {
-      const name = match[1].trim();
-      allPlayers.push(name);
-    }
+    if (match) allPlayers.push(match[1].trim());
   }
-
-  const nonRegulars = allPlayers.filter(name => {
-    return !REGULARS.some(regular =>
-      name.includes(regular) || regular.includes(name)
-    );
-  });
-
-  return nonRegulars;
+  return allPlayers.filter(name =>
+    !REGULARS.some(r => name.includes(r) || r.includes(name))
+  );
 }
 
 // ==================== הודעות ====================
@@ -62,11 +53,10 @@ ${PAYBOX_LINK}
 מי ששילם — שיכתוב "שולם" בקבוצה 🙏`;
 
 function buildReminderMessage(pending) {
-  const namesList = pending.map(name => `• ${name}`).join('\n');
   return `⚽ בוט תזכורת תשלום ⚽
 
 המשתתפים הבאים טרם העבירו תשלום עבור המשחק:
-${namesList}
+${pending.map(n => `• ${n}`).join('\n')}
 
 נא להעביר ${PAYMENT_AMOUNT} ש״ח לפייבוקס:
 ${PAYBOX_LINK}
@@ -74,189 +64,154 @@ ${PAYBOX_LINK}
 מי ששילם — שיכתוב "שולם" בקבוצה 🙏`;
 }
 
-// ==================== WhatsApp Client ====================
-const client = new Client({
-  authStrategy: new LocalAuth(),
-  puppeteer: {
-    headless: true,
-    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
-  }
-});
+// ==================== Bot ====================
+let sock;
 
-client.on('qr', (qr) => {
-  console.log('\n📱 סרוק את הקוד הבא עם הוואטסאפ שלך:\n');
-  qrcode.generate(qr, { small: true });
-});
+async function connectToWhatsApp() {
+  const { state, saveCreds } = await useMultiFileAuthState(AUTH_FOLDER);
+  const { version } = await fetchLatestBaileysVersion();
 
-client.on('ready', () => {
-  console.log('✅ הבוט מחובר ומוכן!');
-  setupCronJobs();
-});
+  sock = makeWASocket({
+    version,
+    auth: state,
+    logger: pino({ level: 'silent' }),
+    printQRInTerminal: false,
+  });
 
-client.on('auth_failure', () => {
-  console.error('❌ שגיאת אימות — נסה שוב');
-});
+  sock.ev.on('connection.update', async (update) => {
+    const { connection, lastDisconnect, qr } = update;
 
-// ==================== מאזין ל"שולם" ====================
-client.on('message', async (msg) => {
-  const data = loadData();
-  if (!data.active || data.pendingPayments.length === 0) return;
+    if (qr) {
+      console.log('\n📱 סרוק את הקוד הבא עם הוואטסאפ שלך:\n');
+      qrcode.generate(qr, { small: true });
+    }
 
-  const text = msg.body.trim();
-  if (text !== 'שולם') return;
+    if (connection === 'close') {
+      const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
+      console.log('התנתק, מתחבר מחדש:', shouldReconnect);
+      if (shouldReconnect) connectToWhatsApp();
+    } else if (connection === 'open') {
+      console.log('✅ הבוט מחובר!');
+      setupCronJobs();
+    }
+  });
 
-  const chat = await msg.getChat();
-  if (!chat.isGroup) return;
-  if (chat.name !== GROUP_NAME) return;
+  sock.ev.on('creds.update', saveCreds);
 
-  const contact = await msg.getContact();
-  const senderName = contact.pushname || contact.name || '';
+  sock.ev.on('messages.upsert', async ({ messages }) => {
+    for (const msg of messages) {
+      if (!msg.message) continue;
+      const text = (msg.message.conversation || msg.message.extendedTextMessage?.text || '').trim();
+      if (text !== 'שולם') continue;
 
-  const before = data.pendingPayments.length;
-  data.pendingPayments = data.pendingPayments.filter(name =>
-    !senderName.includes(name) && !name.includes(senderName)
-  );
+      const data = loadData();
+      if (!data.active || data.pendingPayments.length === 0) continue;
+      if (msg.key.remoteJid !== data.groupId) continue;
 
-  if (data.pendingPayments.length < before) {
-    saveData(data);
-    console.log(`✅ ${senderName} סומן כשילם. נותרו: ${data.pendingPayments.join(', ') || 'אף אחד'}`);
-  }
-});
+      // מזהה שם השולח
+      const sender = msg.pushName || '';
+      const before = data.pendingPayments.length;
+      data.pendingPayments = data.pendingPayments.filter(name =>
+        !sender.includes(name) && !name.includes(sender)
+      );
 
-// ==================== פונקציות שליחה ====================
-async function getGroup() {
-  const chats = await client.getChats();
-  return chats.find(c => c.isGroup && c.name === GROUP_NAME);
+      if (data.pendingPayments.length < before) {
+        saveData(data);
+        console.log(`✅ ${sender} סומן כשילם. נותרו: ${data.pendingPayments.join(', ') || 'אף אחד'}`);
+      }
+    }
+  });
 }
 
-async function scanWeeklyList() {
-  console.log('🔍 סורק רשימה שבועית...');
-  const group = await getGroup();
-  if (!group) {
-    console.log('❌ קבוצה לא נמצאה');
-    return null;
-  }
+// ==================== פונקציות שליחה ====================
+async function getGroupId() {
+  const data = loadData();
+  if (data.groupId) return data.groupId;
 
-  const messages = await group.fetchMessages({ limit: 50 });
-  const tuesday = new Date();
-  tuesday.setHours(0, 0, 0, 0);
-
-  // מחפש הודעה עם רשימת שחקנים מהיום
-  for (const msg of messages.reverse()) {
-    const msgDate = new Date(msg.timestamp * 1000);
-    if (msgDate < tuesday) continue;
-
-    if (msg.body.includes('קבוצה 1') && msg.body.includes('קבוצה 2')) {
-      const nonRegulars = extractNonRegularsFromMessage(msg.body);
-      console.log(`📋 נמצאו לא קבועים: ${nonRegulars.join(', ') || 'אף אחד'}`);
-      return nonRegulars;
+  const groups = await sock.groupFetchAllParticipating();
+  for (const [id, g] of Object.entries(groups)) {
+    if (g.subject === GROUP_NAME) {
+      data.groupId = id;
+      saveData(data);
+      return id;
     }
   }
-
-  console.log('⚠️ לא נמצאה רשימה שבועית');
   return null;
 }
 
-async function sendTuesdayMessage() {
-  console.log('📨 שולח הודעת שלישי...');
+async function scanAndSendTuesday() {
+  console.log('🔍 שלישי 23:00 — סורק רשימה...');
+  const groupId = await getGroupId();
+  if (!groupId) { console.log('❌ קבוצה לא נמצאה'); return; }
 
-  const nonRegulars = await scanWeeklyList();
-  if (!nonRegulars || nonRegulars.length === 0) {
-    console.log('אין לא קבועים השבוע, לא שולח הודעה');
+  // מביא הודעות אחרונות
+  const msgs = await sock.fetchMessageHistory(20, { remoteJid: groupId }, new Date());
+  let nonRegulars = [];
+
+  for (const m of (msgs || [])) {
+    const text = m.message?.conversation || m.message?.extendedTextMessage?.text || '';
+    if (text.includes('קבוצה 1') && text.includes('קבוצה 2')) {
+      nonRegulars = extractNonRegulars(text);
+      break;
+    }
+  }
+
+  if (nonRegulars.length === 0) {
+    console.log('אין לא קבועים השבוע');
     return;
   }
 
   const data = loadData();
   data.pendingPayments = nonRegulars;
   data.active = true;
-  data.lastGameDate = new Date().toISOString();
+  data.groupId = groupId;
   saveData(data);
 
-  const group = await getGroup();
-  if (!group) return;
-
-  await group.sendMessage(GENERAL_MESSAGE);
-  console.log('✅ הודעה כללית נשלחה');
+  await sock.sendMessage(groupId, { text: GENERAL_MESSAGE });
+  console.log(`✅ הודעה כללית נשלחה. לא קבועים: ${nonRegulars.join(', ')}`);
 }
 
-async function sendDailyReminder() {
-  console.log('📨 שולח תזכורת יומית...');
+async function sendReminder() {
+  console.log('📨 שולח תזכורת...');
   const data = loadData();
-
   if (!data.active || data.pendingPayments.length === 0) {
-    console.log('אין חובות פתוחים, לא שולח הודעה');
+    console.log('אין חובות פתוחים');
     data.active = false;
     saveData(data);
     return;
   }
-
-  const group = await getGroup();
-  if (!group) return;
-
-  const message = buildReminderMessage(data.pendingPayments);
-  await group.sendMessage(message);
+  await sock.sendMessage(data.groupId, { text: buildReminderMessage(data.pendingPayments) });
   console.log(`✅ תזכורת נשלחה ל: ${data.pendingPayments.join(', ')}`);
 }
 
-// ==================== Cron Jobs ====================
+// ==================== Cron ====================
 function setupCronJobs() {
-  // שלישי 23:00 - סריקה + הודעה כללית
-  cron.schedule('0 23 * * 2', sendTuesdayMessage, { timezone: 'Asia/Jerusalem' });
-
-  // רביעי 9:00
-  cron.schedule('0 9 * * 3', sendDailyReminder, { timezone: 'Asia/Jerusalem' });
-
-  // חמישי 9:00
-  cron.schedule('0 9 * * 4', sendDailyReminder, { timezone: 'Asia/Jerusalem' });
-
-  // חמישי 21:00
-  cron.schedule('0 21 * * 4', sendDailyReminder, { timezone: 'Asia/Jerusalem' });
-
-  console.log('⏰ לוח זמנים מוגדר:');
-  console.log('  שלישי 23:00 - סריקה + הודעה כללית');
-  console.log('  רביעי 09:00 - תזכורת');
-  console.log('  חמישי 09:00 - תזכורת');
-  console.log('  חמישי 21:00 - תזכורת אחרונה');
+  cron.schedule('0 23 * * 2', scanAndSendTuesday, { timezone: 'Asia/Jerusalem' });
+  cron.schedule('0 9 * * 3', sendReminder, { timezone: 'Asia/Jerusalem' });
+  cron.schedule('0 9 * * 4', sendReminder, { timezone: 'Asia/Jerusalem' });
+  cron.schedule('0 21 * * 4', sendReminder, { timezone: 'Asia/Jerusalem' });
+  console.log('⏰ לוח זמנים פעיל');
 }
 
 // ==================== פקודות ניהול ====================
-// הפעלה ידנית מהטרמינל לצורכי בדיקה
 const args = process.argv.slice(2);
-if (args[0] === 'test-tuesday') {
-  client.on('ready', async () => {
-    await sendTuesdayMessage();
-    process.exit(0);
-  });
-} else if (args[0] === 'test-reminder') {
-  client.on('ready', async () => {
-    await sendDailyReminder();
-    process.exit(0);
-  });
-} else if (args[0] === 'stop') {
+if (args[0] === 'stop') {
   const data = loadData();
   data.active = false;
   data.pendingPayments = [];
   saveData(data);
-  console.log('✅ הבוט הופסק, לא ישלח יותר הודעות השבוע');
+  console.log('✅ הופסק');
   process.exit(0);
 } else if (args[0] === 'status') {
   const data = loadData();
-  console.log('📊 סטטוס נוכחי:');
-  console.log(`  פעיל: ${data.active}`);
-  console.log(`  ממתינים לתשלום: ${data.pendingPayments.join(', ') || 'אף אחד'}`);
+  console.log(`פעיל: ${data.active}\nממתינים: ${data.pendingPayments.join(', ') || 'אף אחד'}`);
   process.exit(0);
 } else if (args[0] === 'paid') {
-  const name = args[1];
-  if (!name) {
-    console.log('שימוש: node index.js paid "שם"');
-    process.exit(1);
-  }
   const data = loadData();
-  data.pendingPayments = data.pendingPayments.filter(n => n !== name);
+  data.pendingPayments = data.pendingPayments.filter(n => n !== args[1]);
   saveData(data);
-  console.log(`✅ ${name} סומן כשילם`);
+  console.log(`✅ ${args[1]} סומן כשילם`);
   process.exit(0);
 }
 
-client.initialize();
+connectToWhatsApp();
