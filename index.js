@@ -1,12 +1,12 @@
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
-const qrcode = require('qrcode-terminal');
 const cron = require('node-cron');
 const fs = require('fs-extra');
 const path = require('path');
 const pino = require('pino');
 const http = require('http');
+const stringSimilarity = require('string-similarity');
 
-// שרת HTTP פשוט להצגת QR
+// ==================== שרת HTTP להצגת QR ====================
 let currentQR = null;
 http.createServer((req, res) => {
   if (currentQR) {
@@ -23,7 +23,7 @@ http.createServer((req, res) => {
     res.end('<html><body><h2>✅ הבוט מחובר!</h2></body></html>');
   }
 }).listen(process.env.PORT || 3000, () => {
-  console.log('🌐 פתח את כתובת ה-URL של Render לסריקת QR');
+  console.log('🌐 שרת HTTP פעיל');
 });
 
 // ==================== הגדרות ====================
@@ -32,6 +32,7 @@ const PAYBOX_LINK = 'https://links.payboxapp.com/5B58fGzSKUb';
 const PAYMENT_AMOUNT = '30';
 const DATA_FILE = path.join(__dirname, 'data.json');
 const AUTH_FOLDER = path.join(__dirname, 'auth_info');
+const SIMILARITY_THRESHOLD = 0.75; // רגישות זיהוי שמות (0-1)
 
 const REGULARS = [
   'אייל קרוואני', 'אסף', 'אורן', 'דורון', 'תומר לבון',
@@ -45,11 +46,38 @@ function loadData() {
   try {
     if (fs.existsSync(DATA_FILE)) return fs.readJsonSync(DATA_FILE);
   } catch (e) {}
-  return { pendingPayments: [], active: false, groupId: null };
+  return { pendingPayments: [], active: false, groupId: null, adminId: null };
 }
 
 function saveData(data) {
   fs.writeJsonSync(DATA_FILE, data, { spaces: 2 });
+}
+
+// ==================== זיהוי חכם של שמות ====================
+function isSimilarToRegular(name) {
+  for (const regular of REGULARS) {
+    // בדיקה ישירה
+    if (name.includes(regular) || regular.includes(name)) return true;
+    // בדיקת דמיון
+    const similarity = stringSimilarity.compareTwoStrings(name, regular);
+    if (similarity >= SIMILARITY_THRESHOLD) {
+      console.log(`🔍 זיהוי חכם: "${name}" ≈ "${regular}" (${Math.round(similarity * 100)}%)`);
+      return true;
+    }
+  }
+  return false;
+}
+
+function isSimilarToPending(sender, pendingList) {
+  for (const name of pendingList) {
+    if (sender.includes(name) || name.includes(sender)) return name;
+    const similarity = stringSimilarity.compareTwoStrings(sender, name);
+    if (similarity >= SIMILARITY_THRESHOLD) {
+      console.log(`🔍 זיהוי חכם תשלום: "${sender}" ≈ "${name}" (${Math.round(similarity * 100)}%)`);
+      return name;
+    }
+  }
+  return null;
 }
 
 // ==================== עיבוד רשימה ====================
@@ -60,9 +88,7 @@ function extractNonRegulars(text) {
     const match = line.match(/^\d+\.\s*(.+)/);
     if (match) allPlayers.push(match[1].trim());
   }
-  return allPlayers.filter(name =>
-    !REGULARS.some(r => name.includes(r) || r.includes(name))
-  );
+  return allPlayers.filter(name => !isSimilarToRegular(name));
 }
 
 // ==================== הודעות ====================
@@ -87,6 +113,7 @@ ${PAYBOX_LINK}
 
 // ==================== Bot ====================
 let sock;
+let adminJid = null;
 
 async function connectToWhatsApp() {
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_FOLDER);
@@ -104,15 +131,14 @@ async function connectToWhatsApp() {
 
     if (qr) {
       currentQR = qr;
-      console.log('📱 פתח את כתובת ה-URL של Render וסרוק את ה-QR מהדפדפן!');
-
+      console.log('📱 פתח את ה-URL לסריקת QR');
     }
 
     if (connection === 'close') {
       const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
-      console.log('התנתק, מתחבר מחדש:', shouldReconnect);
       if (shouldReconnect) connectToWhatsApp();
     } else if (connection === 'open') {
+      currentQR = null;
       console.log('✅ הבוט מחובר!');
       setupCronJobs();
     }
@@ -122,22 +148,63 @@ async function connectToWhatsApp() {
 
   sock.ev.on('messages.upsert', async ({ messages }) => {
     for (const msg of messages) {
-      if (!msg.message) continue;
+      if (!msg.message || msg.key.fromMe) continue;
       const text = (msg.message.conversation || msg.message.extendedTextMessage?.text || '').trim();
-      if (text !== 'שולם') continue;
-
+      const sender = msg.pushName || '';
+      const isPrivate = !msg.key.remoteJid.includes('@g.us');
       const data = loadData();
+
+      // ==================== הודעות פרטיות לניהול ====================
+      if (isPrivate) {
+        // שמור את ה-admin (מי שמתקשר ראשון)
+        if (!data.adminId) {
+          data.adminId = msg.key.remoteJid;
+          saveData(data);
+          adminJid = data.adminId;
+          console.log(`👤 Admin הוגדר: ${sender}`);
+        }
+
+        if (msg.key.remoteJid !== data.adminId) continue;
+
+        // פקודה: שולם [שם]
+        if (text.startsWith('שולם ')) {
+          const name = text.replace('שולם ', '').trim();
+          const matched = isSimilarToPending(name, data.pendingPayments);
+          if (matched) {
+            data.pendingPayments = data.pendingPayments.filter(n => n !== matched);
+            saveData(data);
+            await sock.sendMessage(msg.key.remoteJid, { text: `✅ ${matched} הוסר מהרשימה. נותרו: ${data.pendingPayments.join(', ') || 'אף אחד'}` });
+          } else {
+            await sock.sendMessage(msg.key.remoteJid, { text: `❌ לא נמצא "${name}" ברשימה. רשימה נוכחית: ${data.pendingPayments.join(', ')}` });
+          }
+        }
+
+        // פקודה: סטטוס
+        else if (text === 'סטטוס') {
+          await sock.sendMessage(msg.key.remoteJid, {
+            text: `📊 סטטוס:\nפעיל: ${data.active}\nממתינים לתשלום: ${data.pendingPayments.join(', ') || 'אף אחד'}`
+          });
+        }
+
+        // פקודה: עצור
+        else if (text === 'עצור') {
+          data.active = false;
+          data.pendingPayments = [];
+          saveData(data);
+          await sock.sendMessage(msg.key.remoteJid, { text: '✅ הבוט הופסק, לא ישלח הודעות השבוע' });
+        }
+
+        continue;
+      }
+
+      // ==================== הודעות בקבוצה ====================
       if (!data.active || data.pendingPayments.length === 0) continue;
       if (msg.key.remoteJid !== data.groupId) continue;
+      if (text !== 'שולם') continue;
 
-      // מזהה שם השולח
-      const sender = msg.pushName || '';
-      const before = data.pendingPayments.length;
-      data.pendingPayments = data.pendingPayments.filter(name =>
-        !sender.includes(name) && !name.includes(sender)
-      );
-
-      if (data.pendingPayments.length < before) {
+      const matched = isSimilarToPending(sender, data.pendingPayments);
+      if (matched) {
+        data.pendingPayments = data.pendingPayments.filter(n => n !== matched);
         saveData(data);
         console.log(`✅ ${sender} סומן כשילם. נותרו: ${data.pendingPayments.join(', ') || 'אף אחד'}`);
       }
@@ -166,7 +233,6 @@ async function scanAndSendTuesday() {
   const groupId = await getGroupId();
   if (!groupId) { console.log('❌ קבוצה לא נמצאה'); return; }
 
-  // מביא הודעות אחרונות
   const msgs = await sock.fetchMessageHistory(20, { remoteJid: groupId }, new Date());
   let nonRegulars = [];
 
@@ -213,27 +279,6 @@ function setupCronJobs() {
   cron.schedule('0 9 * * 4', sendReminder, { timezone: 'Asia/Jerusalem' });
   cron.schedule('0 21 * * 4', sendReminder, { timezone: 'Asia/Jerusalem' });
   console.log('⏰ לוח זמנים פעיל');
-}
-
-// ==================== פקודות ניהול ====================
-const args = process.argv.slice(2);
-if (args[0] === 'stop') {
-  const data = loadData();
-  data.active = false;
-  data.pendingPayments = [];
-  saveData(data);
-  console.log('✅ הופסק');
-  process.exit(0);
-} else if (args[0] === 'status') {
-  const data = loadData();
-  console.log(`פעיל: ${data.active}\nממתינים: ${data.pendingPayments.join(', ') || 'אף אחד'}`);
-  process.exit(0);
-} else if (args[0] === 'paid') {
-  const data = loadData();
-  data.pendingPayments = data.pendingPayments.filter(n => n !== args[1]);
-  saveData(data);
-  console.log(`✅ ${args[1]} סומן כשילם`);
-  process.exit(0);
 }
 
 connectToWhatsApp();
