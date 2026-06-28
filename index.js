@@ -6,22 +6,74 @@ const pino = require('pino');
 const http = require('http');
 const stringSimilarity = require('string-similarity');
 
-// ==================== שרת HTTP להצגת QR ====================
+// ==================== שרת HTTP + דף ניהול ====================
 let currentQR = null;
+const url = require('url');
+
 http.createServer((req, res) => {
+  const parsed = url.parse(req.url, true);
+
+  // הסרת שם מהרשימה
+  if (parsed.pathname === '/remove' && parsed.query.name) {
+    const name = decodeURIComponent(parsed.query.name);
+    const data = loadData();
+    data.pendingPayments = data.pendingPayments.filter(n => n !== name);
+    saveData(data);
+    res.writeHead(302, { Location: '/' });
+    res.end();
+    return;
+  }
+
+  // עצירת הבוט
+  if (parsed.pathname === '/stop') {
+    const data = loadData();
+    data.active = false;
+    data.pendingPayments = [];
+    saveData(data);
+    res.writeHead(302, { Location: '/' });
+    res.end();
+    return;
+  }
+
+  // דף ראשי
+  const data = loadData();
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+
   if (currentQR) {
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(`
-      <html><body style="text-align:center;padding:40px">
+      <html><body style="text-align:center;padding:40px;font-family:sans-serif">
       <h2>סרוק עם וואטסאפ</h2>
       <img src="https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(currentQR)}" />
       <p>רענן את הדף אם פג תוקף</p>
       </body></html>
     `);
-  } else {
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    res.end('<html><body><h2>✅ הבוט מחובר!</h2></body></html>');
+    return;
   }
+
+  const pendingRows = data.pendingPayments.length === 0
+    ? '<p>✅ כולם שילמו!</p>'
+    : data.pendingPayments.map(name => `
+        <div style="display:flex;align-items:center;gap:12px;margin:8px 0">
+          <span style="font-size:18px">${name}</span>
+          <a href="/remove?name=${encodeURIComponent(name)}" 
+             style="background:#e74c3c;color:white;padding:6px 14px;border-radius:6px;text-decoration:none"
+             onclick="return confirm('לסמן את ${name} כשילם?')">שילם במזומן ✓</a>
+        </div>
+      `).join('');
+
+  res.end(`
+    <html><body style="font-family:sans-serif;padding:30px;direction:rtl">
+    <h2>⚽ בוט תזכורת תשלום</h2>
+    <p>סטטוס: ${data.active ? '🟢 פעיל' : '🔴 לא פעיל'}</p>
+    <h3>ממתינים לתשלום:</h3>
+    ${pendingRows}
+    ${data.active && data.pendingPayments.length > 0 ? `
+      <br><a href="/stop" style="background:#888;color:white;padding:8px 16px;border-radius:6px;text-decoration:none"
+         onclick="return confirm('לעצור את כל ההודעות השבוע?')">עצור הודעות השבוע</a>
+    ` : ''}
+    <br><br><small>רענן את הדף לעדכון</small>
+    </body></html>
+  `);
 }).listen(process.env.PORT || 3000, () => {
   console.log('🌐 שרת HTTP פעיל');
 });
