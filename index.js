@@ -24,6 +24,33 @@ http.createServer((req, res) => {
     return;
   }
 
+  // הדבקת רשימה ידנית
+  if (parsed.pathname === '/paste-list' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      const params = new URLSearchParams(body);
+      const text = params.get('text') || '';
+      if (text.includes('קבוצה 1') && text.includes('קבוצה 2')) {
+        const data = loadData();
+        data.lastWeeklyListText = text;
+        data.lastWeeklyListTime = new Date().toISOString();
+        if (!data.lastWeeklyListGroupId) {
+          getGroupId().then(id => {
+            data.lastWeeklyListGroupId = id;
+            saveData(data);
+          });
+        } else {
+          saveData(data);
+        }
+        console.log('📋 רשימה הוכנסה ידנית');
+      }
+      res.writeHead(302, { Location: '/' });
+      res.end();
+    });
+    return;
+  }
+
   // הרצת סריקה ידנית לבדיקה
   if (parsed.pathname === '/test-scan') {
     scanAndSendTuesday();
@@ -81,7 +108,13 @@ http.createServer((req, res) => {
          onclick="return confirm('לעצור את כל ההודעות השבוע?')">עצור הודעות השבוע</a>
     ` : ''}
     <br><br><a href="/test-scan" style="background:#3498db;color:white;padding:8px 16px;border-radius:6px;text-decoration:none">בדוק סריקה עכשיו (טסט)</a>
-    <br><br><small>רענן את הדף לעדכון</small>
+    <br><br>
+    <h3>הדבק רשימה שבועית ידנית:</h3>
+    <form method="POST" action="/paste-list">
+      <textarea name="text" rows="15" cols="40" placeholder="הדבק כאן את הרשימה מהוואטסאפ..." style="font-family:monospace;direction:rtl;width:100%;max-width:400px"></textarea>
+      <br><button type="submit" style="background:#27ae60;color:white;padding:8px 16px;border-radius:6px;border:none;cursor:pointer;margin-top:8px">שמור רשימה</button>
+    </form>
+    <br><small>רענן את הדף לעדכון</small>
     </body></html>
   `);
 }).listen(process.env.PORT || 3000, () => {
