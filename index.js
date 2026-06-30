@@ -203,8 +203,44 @@ function setupCronJobs() {
 }
 
 // ==================== דף ניהול ====================
-http.createServer((req, res) => {
+http.createServer(async (req, res) => {
   const parsed = new URL(req.url, 'http://localhost');
+
+  if (parsed.pathname === '/groups') {
+    if (!isConnected || !sock) {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end('<html><body><p>לא מחובר</p></body></html>');
+      return;
+    }
+    try {
+      const groups = await sock.groupFetchAllParticipating();
+      const list = Object.entries(groups).map(([id, g]) => 
+        `<div style="margin:8px 0;padding:8px;background:#f0f0f0;border-radius:4px">
+          <b>${g.subject}</b><br>
+          <small>${id}</small><br>
+          <a href="/set-group?id=${encodeURIComponent(id)}" style="background:#27ae60;color:white;padding:4px 10px;border-radius:4px;text-decoration:none;font-size:14px">בחר קבוצה זו</a>
+        </div>`
+      ).join('');
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(`<html><body style="font-family:sans-serif;padding:20px;direction:rtl"><h2>קבוצות</h2>${list}<br><a href="/">חזור</a></body></html>`);
+    } catch (e) {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(`<html><body><p>שגיאה: ${e.message}</p></body></html>`);
+    }
+    return;
+  }
+
+  if (parsed.pathname === '/set-group') {
+    const id = parsed.searchParams.get('id');
+    if (id) {
+      const data = loadData();
+      data.groupId = id;
+      data.lastWeeklyListGroupId = id;
+      saveData(data);
+      console.log(`✅ קבוצה נבחרה: ${id}`);
+    }
+    res.writeHead(302, { Location: '/' }); res.end(); return;
+  }
 
   if (parsed.pathname === '/remove' && parsed.searchParams.get('name')) {
     const name = parsed.searchParams.get('name');
@@ -283,7 +319,7 @@ http.createServer((req, res) => {
     <h2>⚽ בוט תזכורת תשלום</h2>
     <p>סטטוס וואטסאפ: ${isConnected ? '🟢 מחובר' : '🔴 לא מחובר'}</p>
     <p>סטטוס בוט: ${data.active ? '🟢 פעיל' : '🔴 לא פעיל'}</p>
-    <p>רשימה שמורה: ${data.lastWeeklyListTime ? new Date(data.lastWeeklyListTime).toLocaleString('he-IL') : 'אין'}</p>
+    <p>קבוצה מוגדרת: ${data.groupId ? '✅' : '❌ לא מוגדרת — <a href="/groups">בחר קבוצה</a>'}</p>
     <h3>ממתינים לתשלום:</h3>
     ${pendingRows}
     ${data.active && data.pendingPayments.length > 0 ? `
