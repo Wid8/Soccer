@@ -51,6 +51,22 @@ http.createServer((req, res) => {
     return;
   }
 
+  // שליחת הודעה כללית ידנית
+  if (parsed.pathname === '/send-general') {
+    scanAndSendTuesday();
+    res.writeHead(302, { Location: '/' });
+    res.end();
+    return;
+  }
+
+  // שליחת תזכורת עם שמות ידנית
+  if (parsed.pathname === '/send-reminder') {
+    sendReminder();
+    res.writeHead(302, { Location: '/' });
+    res.end();
+    return;
+  }
+
   // הרצת סריקה ידנית לבדיקה
   if (parsed.pathname === '/test-scan') {
     scanAndSendTuesday();
@@ -109,7 +125,13 @@ http.createServer((req, res) => {
     ` : ''}
     <br><br><a href="/test-scan" style="background:#3498db;color:white;padding:8px 16px;border-radius:6px;text-decoration:none">בדוק סריקה עכשיו (טסט)</a>
     <br><br>
-    <h3>הדבק רשימה שבועית ידנית:</h3>
+    <h3>שליחה ידנית (גיבוי):</h3>
+    <a href="/send-general" style="background:#e67e22;color:white;padding:8px 16px;border-radius:6px;text-decoration:none;margin-left:8px"
+       onclick="return confirm('לשלוח הודעה כללית לקבוצה?')">שלח הודעה כללית</a>
+    <a href="/send-reminder" style="background:#e74c3c;color:white;padding:8px 16px;border-radius:6px;text-decoration:none"
+       onclick="return confirm('לשלוח תזכורת עם שמות לקבוצה?')">שלח תזכורת עם שמות</a>
+    <br><br>
+    <h3>הדבק רשימה שבועית ידנית (גיבוי):</h3>
     <form method="POST" action="/paste-list">
       <textarea name="text" rows="15" cols="40" placeholder="הדבק כאן את הרשימה מהוואטסאפ..." style="font-family:monospace;direction:rtl;width:100%;max-width:400px"></textarea>
       <br><button type="submit" style="background:#27ae60;color:white;padding:8px 16px;border-radius:6px;border:none;cursor:pointer;margin-top:8px">שמור רשימה</button>
