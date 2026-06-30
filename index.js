@@ -53,7 +53,12 @@ http.createServer((req, res) => {
 
   // שליחת הודעה כללית ידנית
   if (parsed.pathname === '/send-general') {
-    scanAndSendTuesday();
+    getGroupId().then(async groupId => {
+      if (groupId) {
+        await sock.sendMessage(groupId, { text: GENERAL_MESSAGE });
+        console.log('✅ הודעה כללית נשלחה ידנית');
+      }
+    });
     res.writeHead(302, { Location: '/' });
     res.end();
     return;
