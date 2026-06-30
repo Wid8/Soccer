@@ -24,6 +24,14 @@ http.createServer((req, res) => {
     return;
   }
 
+  // הרצת סריקה ידנית לבדיקה
+  if (parsed.pathname === '/test-scan') {
+    scanAndSendTuesday();
+    res.writeHead(302, { Location: '/' });
+    res.end();
+    return;
+  }
+
   // עצירת הבוט
   if (parsed.pathname === '/stop') {
     const data = loadData();
@@ -65,12 +73,14 @@ http.createServer((req, res) => {
     <html><body style="font-family:sans-serif;padding:30px;direction:rtl">
     <h2>⚽ בוט תזכורת תשלום</h2>
     <p>סטטוס: ${data.active ? '🟢 פעיל' : '🔴 לא פעיל'}</p>
+    <p>רשימה שבועית אחרונה שנשמרה: ${data.lastWeeklyListTime ? new Date(data.lastWeeklyListTime).toLocaleString('he-IL') : 'אף פעם'}</p>
     <h3>ממתינים לתשלום:</h3>
     ${pendingRows}
     ${data.active && data.pendingPayments.length > 0 ? `
       <br><a href="/stop" style="background:#888;color:white;padding:8px 16px;border-radius:6px;text-decoration:none"
          onclick="return confirm('לעצור את כל ההודעות השבוע?')">עצור הודעות השבוע</a>
     ` : ''}
+    <br><br><a href="/test-scan" style="background:#3498db;color:white;padding:8px 16px;border-radius:6px;text-decoration:none">בדוק סריקה עכשיו (טסט)</a>
     <br><br><small>רענן את הדף לעדכון</small>
     </body></html>
   `);
@@ -206,6 +216,14 @@ async function connectToWhatsApp() {
       const isPrivate = !msg.key.remoteJid.includes('@g.us');
       const data = loadData();
 
+      // ==================== שמירת רשימה שבועית בזמן אמת ====================
+      if (!isPrivate && text.includes('קבוצה 1') && text.includes('קבוצה 2')) {
+        data.lastWeeklyListText = text;
+        data.lastWeeklyListGroupId = msg.key.remoteJid;
+        data.lastWeeklyListTime = new Date().toISOString();
+        saveData(data);
+        console.log(`📋 רשימה שבועית נשמרה (${new Date().toLocaleString('he-IL')})`);
+      }
       // ==================== הודעות פרטיות לניהול ====================
       if (isPrivate) {
         // שמור את ה-admin (מי שמתקשר ראשון)
@@ -281,27 +299,33 @@ async function getGroupId() {
 }
 
 async function scanAndSendTuesday() {
-  console.log('🔍 שלישי 23:00 — סורק רשימה...');
-  const groupId = await getGroupId();
-  if (!groupId) { console.log('❌ קבוצה לא נמצאה'); return; }
+  console.log('🔍 שלישי 23:00 — בודק רשימה שמורה...');
+  const data = loadData();
 
-  const msgs = await sock.fetchMessageHistory(20, { remoteJid: groupId }, new Date());
-  let nonRegulars = [];
-
-  for (const m of (msgs || [])) {
-    const text = m.message?.conversation || m.message?.extendedTextMessage?.text || '';
-    if (text.includes('קבוצה 1') && text.includes('קבוצה 2')) {
-      nonRegulars = extractNonRegulars(text);
-      break;
-    }
+  if (!data.lastWeeklyListText) {
+    console.log('❌ לא נמצאה רשימה שבועית שמורה. ודא שחברך פרסם את הרשימה לפני 23:00 וה-בוט היה מחובר.');
+    return;
   }
+
+  // ודא שהרשימה מהיום (לא משבוע קודם)
+  const listDate = new Date(data.lastWeeklyListTime);
+  const hoursSinceList = (Date.now() - listDate.getTime()) / (1000 * 60 * 60);
+  if (hoursSinceList > 12) {
+    console.log(`⚠️ הרשימה השמורה ישנה מדי (${Math.round(hoursSinceList)} שעות). לא נשלחת הודעה.`);
+    return;
+  }
+
+  const nonRegulars = extractNonRegulars(data.lastWeeklyListText);
+  console.log(`📋 לא קבועים שזוהו: ${nonRegulars.join(', ') || 'אף אחד'}`);
 
   if (nonRegulars.length === 0) {
     console.log('אין לא קבועים השבוע');
     return;
   }
 
-  const data = loadData();
+  const groupId = data.lastWeeklyListGroupId || await getGroupId();
+  if (!groupId) { console.log('❌ קבוצה לא נמצאה'); return; }
+
   data.pendingPayments = nonRegulars;
   data.active = true;
   data.groupId = groupId;
@@ -325,12 +349,15 @@ async function sendReminder() {
 }
 
 // ==================== Cron ====================
+let cronJobsSet = false;
 function setupCronJobs() {
+  if (cronJobsSet) { console.log('⏰ לוח זמנים כבר פעיל, מדלג'); return; }
+  cronJobsSet = true;
   cron.schedule('0 23 * * 2', scanAndSendTuesday, { timezone: 'Asia/Jerusalem' });
   cron.schedule('0 9 * * 3', sendReminder, { timezone: 'Asia/Jerusalem' });
   cron.schedule('0 9 * * 4', sendReminder, { timezone: 'Asia/Jerusalem' });
   cron.schedule('0 21 * * 4', sendReminder, { timezone: 'Asia/Jerusalem' });
-  console.log('⏰ לוח זמנים פעיל');
+  console.log('⏰ לוח זמנים מוגדר');
 }
 
 connectToWhatsApp();
