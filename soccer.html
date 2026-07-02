@@ -157,9 +157,10 @@
 <!-- עריכת קבועים -->
 <div class="card hidden" id="regulars-card">
   <h2>רשימת קבועים</h2>
-  <p style="font-size:0.8rem;color:#6b8aad;margin-bottom:10px">שם אחד בכל שורה</p>
-  <textarea id="regulars-input" style="height:200px" dir="rtl"></textarea>
-  <button class="btn btn-primary" style="margin-top:8px" onclick="saveRegulars()">שמור קבועים</button>
+  <p style="font-size:0.8rem;color:#6b8aad;margin-bottom:12px">הרשימה נטענת מ-Google Sheets. לעריכה לחץ על הכפתור:</p>
+  <a href="https://docs.google.com/spreadsheets/d/1i5NE8kyAmLDIFcHJZDJGjTz1G0Z8QYv3G8wMNDiualo/edit" target="_blank" class="btn btn-primary" style="display:block">📋 פתח Google Sheets לעריכה</a>
+  <button class="btn" style="background:#263347;color:#6b8aad;margin-top:8px" onclick="loadRegularsFromSheet()">🔄 רענן רשימת קבועים</button>
+  <div id="regulars-status" style="font-size:0.8rem;color:#6b8aad;margin-top:8px"></div>
 </div>
 
 <!-- שלב 2: תוצאות -->
@@ -179,9 +180,18 @@
 <!-- שלב 3: שליחת הודעות -->
 <div class="card hidden" id="send-card">
   <h2>שלב 2 — שלח הודעה</h2>
-  <div id="msg-preview"></div>
-  <button class="btn btn-green" id="btn-general" onclick="sendWhatsApp('general')">📤 שלח הודעה כללית (שלישי 23:00)</button>
-  <button class="btn btn-orange" onclick="sendWhatsApp('reminder')" style="margin-top:8px">🔔 שלח תזכורת עם שמות</button>
+
+  <div style="background:#0f1923;border-radius:10px;padding:14px;margin-bottom:10px;border:1px solid #263347">
+    <div style="font-size:0.75rem;text-transform:uppercase;letter-spacing:1px;color:#6b8aad;margin-bottom:8px">הודעה כללית — שלישי 23:00</div>
+    <div id="msg-general" style="font-size:0.88rem;line-height:1.6;white-space:pre-wrap;color:#c8d8e8;margin-bottom:10px"></div>
+    <button class="btn btn-green" onclick="sendWhatsApp('general')">📤 שלח הודעה כללית</button>
+  </div>
+
+  <div style="background:#0f1923;border-radius:10px;padding:14px;border:1px solid #263347">
+    <div style="font-size:0.75rem;text-transform:uppercase;letter-spacing:1px;color:#6b8aad;margin-bottom:8px">תזכורת עם שמות — רביעי/חמישי</div>
+    <div id="msg-reminder" style="font-size:0.88rem;line-height:1.6;white-space:pre-wrap;color:#c8d8e8;margin-bottom:10px"></div>
+    <button class="btn btn-orange" onclick="sendWhatsApp('reminder')">🔔 שלח תזכורת עם שמות</button>
+  </div>
 </div>
 
 <script>
@@ -236,7 +246,7 @@ function processlist() {
   render();
   document.getElementById('results-card').classList.remove('hidden');
   document.getElementById('send-card').classList.remove('hidden');
-  updatePreview('general');
+  updatePreviews();
 }
 
 function render() {
@@ -270,7 +280,7 @@ function render() {
       </div>`).join('');
   }
 
-  updatePreview('reminder');
+  updatePreviews();
 }
 
 function markPaid(name) {
@@ -285,59 +295,55 @@ function markUnpaid(name) {
   render();
 }
 
-function updatePreview(type) {
-  const el = document.getElementById('msg-preview');
-  if (type === 'general') {
-    el.textContent = `⚽ בוט תזכורת תשלום ⚽\n\nמי שהשתתף במשחק הערב ואינו ברשימת הקבועים — נא להעביר 30 ש״ח לפייבוקס של הקבוצה:\n${PAYBOX_LINK}\n\nמי ששילם — שיכתוב "שולם" בקבוצה 🙏`;
+function updatePreviews() {
+  const generalMsg = `⚽ בוט תזכורת תשלום ⚽\n\nמי שהשתתף במשחק הערב ואינו ברשימת הקבועים — נא להעביר 30 ש״ח לפייבוקס של הקבוצה:\n${PAYBOX_LINK}\n\nמי ששילם — שיכתוב "שולם" בקבוצה 🙏`;
+  document.getElementById('msg-general').textContent = generalMsg;
+
+  if (unpaid.length === 0) {
+    document.getElementById('msg-reminder').textContent = '✅ כולם שילמו — אין צורך לשלוח תזכורת';
   } else {
-    if (unpaid.length === 0) {
-      el.textContent = '✅ כולם שילמו — אין צורך לשלוח תזכורת';
-      return;
-    }
-    el.textContent = `⚽ בוט תזכורת תשלום ⚽\n\nהמשתתפים הבאים טרם העבירו תשלום עבור המשחק:\n${unpaid.map(n => `• ${n}`).join('\n')}\n\nנא להעביר 30 ש״ח לפייבוקס:\n${PAYBOX_LINK}\n\nמי ששילם — שיכתוב "שולם" בקבוצה 🙏`;
+    document.getElementById('msg-reminder').textContent = `⚽ בוט תזכורת תשלום ⚽\n\nהמשתתפים הבאים טרם העבירו תשלום עבור המשחק:\n${unpaid.map(n => `• ${n}`).join('\n')}\n\nנא להעביר 30 ש״ח לפייבוקס:\n${PAYBOX_LINK}\n\nמי ששילם — שיכתוב "שולם" בקבוצה 🙏`;
   }
 }
 
 function sendWhatsApp(type) {
-  updatePreview(type);
-  const text = document.getElementById('msg-preview').textContent;
+  const el = type === 'general' ? document.getElementById('msg-general') : document.getElementById('msg-reminder');
+  const text = el.textContent;
   if (text.startsWith('✅')) return;
   const encoded = encodeURIComponent(text);
   window.open(`https://wa.me/?text=${encoded}`, '_blank');
 }
 
+const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/1i5NE8kyAmLDIFcHJZDJGjTz1G0Z8QYv3G8wMNDiualo/gviz/tq?tqx=out:csv&sheet=Sheet1';
+
 function toggleRegulars() {
   const card = document.getElementById('regulars-card');
-  if (card.classList.contains('hidden')) {
-    document.getElementById('regulars-input').value = REGULARS.join('\n');
-    card.classList.remove('hidden');
-  } else {
-    card.classList.add('hidden');
+  card.classList.toggle('hidden');
+}
+
+async function loadRegularsFromSheet() {
+  const status = document.getElementById('regulars-status');
+  status.textContent = '⏳ טוען...';
+  try {
+    const res = await fetch(SHEET_CSV_URL);
+    const text = await res.text();
+    const names = text.split('\n')
+      .slice(1)
+      .map(line => line.replace(/"/g, '').trim())
+      .filter(n => n && n !== 'שם');
+    if (names.length > 0) {
+      REGULARS.length = 0;
+      names.forEach(n => REGULARS.push(n));
+      status.textContent = `✅ נטענו ${names.length} קבועים`;
+    } else {
+      status.textContent = '⚠️ לא נמצאו שמות בגיליון';
+    }
+  } catch(e) {
+    status.textContent = '❌ שגיאה בטעינה — ודא שהגיליון ציבורי';
   }
 }
 
-function saveRegulars() {
-  const text = document.getElementById('regulars-input').value;
-  REGULARS.length = 0;
-  text.split('\n').forEach(line => {
-    const t = line.trim();
-    if (t) REGULARS.push(t);
-  });
-  localStorage.setItem('regulars', JSON.stringify(REGULARS));
-  document.getElementById('regulars-card').classList.add('hidden');
-  alert('✅ רשימת קבועים עודכנה!');
-}
-
-function loadRegulars() {
-  const saved = localStorage.getItem('regulars');
-  if (saved) {
-    const arr = JSON.parse(saved);
-    REGULARS.length = 0;
-    arr.forEach(r => REGULARS.push(r));
-  }
-}
-
-loadRegulars();
+loadRegularsFromSheet();
 </script>
 </body>
 </html>
