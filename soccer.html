@@ -148,19 +148,16 @@
 
 <!-- שלב 1: הדבקת רשימה -->
 <div class="card">
-  <h2>שלב 1 — הדבק את כוחות המשחק האחרון</h2>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <h2 style="margin-bottom:0">שלב 1 — הדבק את כוחות המשחק האחרון</h2>
+    <div style="display:flex;gap:6px;align-items:center">
+      <span id="regulars-status" style="font-size:0.75rem;color:#6b8aad"></span>
+      <a href="https://docs.google.com/spreadsheets/d/1i5NE8kyAmLDIFcHJZDJGjTz1G0Z8QYv3G8wMNDiualo/edit" target="_blank" style="font-size:0.75rem;color:#6b8aad;text-decoration:none;padding:4px 8px;background:#263347;border-radius:6px">✏️ ערוך קבועים</a>
+      <button onclick="loadRegularsFromSheet()" style="font-size:0.75rem;color:#6b8aad;padding:4px 8px;background:#263347;border:none;border-radius:6px;cursor:pointer">🔄 רענן רשימה לאחר שינוי</button>
+    </div>
+  </div>
   <textarea id="input" placeholder="הדבק כאן את הרשימה השבועית מהוואטסאפ..."></textarea>
   <button class="btn btn-primary" onclick="processlist()">זהה לא קבועים ←</button>
-  <button class="btn" style="background:#263347;color:#6b8aad;margin-top:8px" onclick="toggleRegulars()">⚙️ ערוך רשימת קבועים</button>
-</div>
-
-<!-- עריכת קבועים -->
-<div class="card hidden" id="regulars-card">
-  <h2>רשימת קבועים</h2>
-  <p style="font-size:0.8rem;color:#6b8aad;margin-bottom:12px">הרשימה נטענת מ-Google Sheets. לעריכה לחץ על הכפתור:</p>
-  <a href="https://docs.google.com/spreadsheets/d/1i5NE8kyAmLDIFcHJZDJGjTz1G0Z8QYv3G8wMNDiualo/edit" target="_blank" class="btn btn-primary" style="display:block">📋 פתח Google Sheets לעריכה</a>
-  <button class="btn" style="background:#263347;color:#6b8aad;margin-top:8px" onclick="loadRegularsFromSheet()">🔄 רענן רשימת קבועים</button>
-  <div id="regulars-status" style="font-size:0.8rem;color:#6b8aad;margin-top:8px"></div>
 </div>
 
 <!-- שלב 2: תוצאות -->
@@ -314,7 +311,7 @@ function sendWhatsApp(type) {
   window.open(`https://wa.me/?text=${encoded}`, '_blank');
 }
 
-const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/1i5NE8kyAmLDIFcHJZDJGjTz1G0Z8QYv3G8wMNDiualo/gviz/tq?tqx=out:csv&sheet=Sheet1';
+const SHEET_CSV_URL = 'https://corsproxy.io/?url=' + encodeURIComponent('https://docs.google.com/spreadsheets/d/e/2PACX-1vQ0xlgdbpFR9IDe8s0wJwmGwWbOP8xCUNPB5LYnihheJ4yXQk43ZQ2Ke50ayVqAtFS5aUhBJHEexuSS/pub?output=csv');
 
 function toggleRegulars() {
   const card = document.getElementById('regulars-card');
@@ -325,7 +322,8 @@ async function loadRegularsFromSheet() {
   const status = document.getElementById('regulars-status');
   status.textContent = '⏳ טוען...';
   try {
-    const res = await fetch(SHEET_CSV_URL);
+    const url = 'https://corsproxy.io/?url=' + encodeURIComponent('https://docs.google.com/spreadsheets/d/e/2PACX-1vQ0xlgdbpFR9IDe8s0wJwmGwWbOP8xCUNPB5LYnihheJ4yXQk43ZQ2Ke50ayVqAtFS5aUhBJHEexuSS/pub?output=csv');
+    const res = await fetch(url);
     const text = await res.text();
     const names = text.split('\n')
       .slice(1)
