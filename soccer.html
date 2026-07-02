@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>⚽ בוט תשלום כדורגל</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    background: #0f1923;
+    color: #e8edf2;
+    min-height: 100vh;
+    padding: 20px;
+  }
+
+  h1 {
+    text-align: center;
+    font-size: 1.6rem;
+    font-weight: 700;
+    margin-bottom: 24px;
+    color: #fff;
+    letter-spacing: -0.5px;
+  }
+
+  .card {
+    background: #1a2535;
+    border-radius: 14px;
+    padding: 20px;
+    margin-bottom: 16px;
+    border: 1px solid #263347;
+  }
+
+  .card h2 {
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #6b8aad;
+    margin-bottom: 12px;
+  }
+
+  textarea {
+    width: 100%;
+    height: 160px;
+    background: #0f1923;
+    border: 1px solid #263347;
+    border-radius: 8px;
+    color: #e8edf2;
+    font-size: 0.9rem;
+    padding: 12px;
+    resize: vertical;
+    direction: rtl;
+    font-family: inherit;
+  }
+
+  textarea:focus { outline: none; border-color: #3d8ef8; }
+
+  textarea::placeholder { color: #4a5e75; }
+
+  .btn {
+    display: inline-block;
+    padding: 12px 20px;
+    border-radius: 8px;
+    border: none;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: none;
+    transition: opacity 0.15s;
+    width: 100%;
+    text-align: center;
+    margin-top: 10px;
+  }
+
+  .btn:hover { opacity: 0.85; }
+
+  .btn-primary { background: #3d8ef8; color: #fff; }
+  .btn-green { background: #25d366; color: #fff; }
+  .btn-orange { background: #f5a623; color: #fff; }
+  .btn-red { background: #e74c3c; color: #fff; font-size: 0.8rem; padding: 6px 12px; width: auto; margin-top: 0; }
+
+  .player-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 0;
+    border-bottom: 1px solid #263347;
+  }
+
+  .player-row:last-child { border-bottom: none; }
+
+  .player-name { font-size: 1rem; font-weight: 500; }
+
+  .badge {
+    font-size: 0.75rem;
+    padding: 3px 8px;
+    border-radius: 20px;
+    font-weight: 600;
+  }
+
+  .badge-unpaid { background: #3a1a1a; color: #e74c3c; }
+  .badge-paid { background: #1a3a1a; color: #25d366; }
+
+  .empty { color: #4a5e75; text-align: center; padding: 20px 0; font-size: 0.9rem; }
+
+  .count-badge {
+    display: inline-block;
+    background: #e74c3c;
+    color: #fff;
+    border-radius: 20px;
+    padding: 2px 10px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    margin-right: 8px;
+  }
+
+  .section-title-row {
+    display: flex;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+
+  #msg-preview {
+    background: #0f1923;
+    border-radius: 8px;
+    padding: 14px;
+    font-size: 0.88rem;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    color: #c8d8e8;
+    border: 1px solid #263347;
+    margin-bottom: 10px;
+  }
+
+  .hidden { display: none; }
+
+  .divider {
+    height: 1px;
+    background: #263347;
+    margin: 16px 0;
+  }
+</style>
+</head>
+<body>
+
+<h1>⚽ בוט תשלום כדורגל</h1>
+
+<!-- שלב 1: הדבקת רשימה -->
+<div class="card">
+  <h2>שלב 1 — הדבק את כוחות המשחק האחרון</h2>
+  <textarea id="input" placeholder="הדבק כאן את הרשימה השבועית מהוואטסאפ..."></textarea>
+  <button class="btn btn-primary" onclick="processlist()">זהה לא קבועים ←</button>
+  <button class="btn" style="background:#263347;color:#6b8aad;margin-top:8px" onclick="toggleRegulars()">⚙️ ערוך רשימת קבועים</button>
+</div>
+
+<!-- עריכת קבועים -->
+<div class="card hidden" id="regulars-card">
+  <h2>רשימת קבועים</h2>
+  <p style="font-size:0.8rem;color:#6b8aad;margin-bottom:10px">שם אחד בכל שורה</p>
+  <textarea id="regulars-input" style="height:200px" dir="rtl"></textarea>
+  <button class="btn btn-primary" style="margin-top:8px" onclick="saveRegulars()">שמור קבועים</button>
+</div>
+
+<!-- שלב 2: תוצאות -->
+<div class="card hidden" id="results-card">
+  <div class="section-title-row">
+    <h2 style="margin-bottom:0">לא קבועים</h2>
+    <span class="count-badge" id="unpaid-count">0</span>
+  </div>
+  <div id="unpaid-list"></div>
+
+  <div class="divider"></div>
+
+  <h2>שילמו ✓</h2>
+  <div id="paid-list"><div class="empty">אף אחד עדיין</div></div>
+</div>
+
+<!-- שלב 3: שליחת הודעות -->
+<div class="card hidden" id="send-card">
+  <h2>שלב 2 — שלח הודעה</h2>
+  <div id="msg-preview"></div>
+  <button class="btn btn-green" id="btn-general" onclick="sendWhatsApp('general')">📤 שלח הודעה כללית (שלישי 23:00)</button>
+  <button class="btn btn-orange" onclick="sendWhatsApp('reminder')" style="margin-top:8px">🔔 שלח תזכורת עם שמות</button>
+</div>
+
+<script>
+const PAYBOX_LINK = 'https://links.payboxapp.com/5B58fGzSKUb';
+const GROUP_NAME = 'כדורגל ימי ג\' בהוד"ש ⚽';
+
+const REGULARS = [
+  'אייל קרוואני','אסף','אורן','דורון','תומר לבון',
+  'דביר','אופק','זיו','גיא','מור','אבי','שגיא',
+  'סרגיי','רועי','טל וידרמן','שמעון','סהר','ג\'רזי',
+  'ודים','הראל ליסון'
+];
+
+let unpaid = [];
+let paid = [];
+
+function similarity(a, b) {
+  a = a.toLowerCase(); b = b.toLowerCase();
+  if (a.includes(b) || b.includes(a)) return 1;
+  const longer = a.length > b.length ? a : b;
+  const shorter = a.length > b.length ? b : a;
+  if (longer.length === 0) return 1;
+  let matches = 0;
+  for (let i = 0; i < shorter.length; i++) {
+    if (longer.includes(shorter[i])) matches++;
+  }
+  return matches / longer.length;
+}
+
+function isRegular(name) {
+  return REGULARS.some(r => similarity(name, r) > 0.75);
+}
+
+function processlist() {
+  const text = document.getElementById('input').value.trim();
+  if (!text) return;
+
+  const players = [];
+  text.split('\n').forEach(line => {
+    const m = line.match(/^\d+\.\s*(.+)/);
+    if (m) players.push(m[1].trim());
+  });
+
+  unpaid = players.filter(p => !isRegular(p));
+  paid = [];
+
+  if (unpaid.length === 0) {
+    alert('כולם קבועים! אין לא קבועים השבוע.');
+    return;
+  }
+
+  render();
+  document.getElementById('results-card').classList.remove('hidden');
+  document.getElementById('send-card').classList.remove('hidden');
+  updatePreview('general');
+}
+
+function render() {
+  document.getElementById('unpaid-count').textContent = unpaid.length;
+
+  const unpaidEl = document.getElementById('unpaid-list');
+  if (unpaid.length === 0) {
+    unpaidEl.innerHTML = '<div class="empty">✅ כולם שילמו!</div>';
+  } else {
+    unpaidEl.innerHTML = unpaid.map(name => `
+      <div class="player-row">
+        <span class="player-name">${name}</span>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span class="badge badge-unpaid">לא שילם</span>
+          <button class="btn btn-red" onclick="markPaid('${name}')">שילם ✓</button>
+        </div>
+      </div>`).join('');
+  }
+
+  const paidEl = document.getElementById('paid-list');
+  if (paid.length === 0) {
+    paidEl.innerHTML = '<div class="empty">אף אחד עדיין</div>';
+  } else {
+    paidEl.innerHTML = paid.map(name => `
+      <div class="player-row">
+        <span class="player-name">${name}</span>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span class="badge badge-paid">שילם ✓</span>
+          <button class="btn btn-red" onclick="markUnpaid('${name}')">בטל</button>
+        </div>
+      </div>`).join('');
+  }
+
+  updatePreview('reminder');
+}
+
+function markPaid(name) {
+  unpaid = unpaid.filter(n => n !== name);
+  paid.push(name);
+  render();
+}
+
+function markUnpaid(name) {
+  paid = paid.filter(n => n !== name);
+  unpaid.push(name);
+  render();
+}
+
+function updatePreview(type) {
+  const el = document.getElementById('msg-preview');
+  if (type === 'general') {
+    el.textContent = `⚽ בוט תזכורת תשלום ⚽\n\nמי שהשתתף במשחק הערב ואינו ברשימת הקבועים — נא להעביר 30 ש״ח לפייבוקס של הקבוצה:\n${PAYBOX_LINK}\n\nמי ששילם — שיכתוב "שולם" בקבוצה 🙏`;
+  } else {
+    if (unpaid.length === 0) {
+      el.textContent = '✅ כולם שילמו — אין צורך לשלוח תזכורת';
+      return;
+    }
+    el.textContent = `⚽ בוט תזכורת תשלום ⚽\n\nהמשתתפים הבאים טרם העבירו תשלום עבור המשחק:\n${unpaid.map(n => `• ${n}`).join('\n')}\n\nנא להעביר 30 ש״ח לפייבוקס:\n${PAYBOX_LINK}\n\nמי ששילם — שיכתוב "שולם" בקבוצה 🙏`;
+  }
+}
+
+function sendWhatsApp(type) {
+  updatePreview(type);
+  const text = document.getElementById('msg-preview').textContent;
+  if (text.startsWith('✅')) return;
+  const encoded = encodeURIComponent(text);
+  window.open(`https://wa.me/?text=${encoded}`, '_blank');
+}
+
+function toggleRegulars() {
+  const card = document.getElementById('regulars-card');
+  if (card.classList.contains('hidden')) {
+    document.getElementById('regulars-input').value = REGULARS.join('\n');
+    card.classList.remove('hidden');
+  } else {
+    card.classList.add('hidden');
+  }
+}
+
+function saveRegulars() {
+  const text = document.getElementById('regulars-input').value;
+  REGULARS.length = 0;
+  text.split('\n').forEach(line => {
+    const t = line.trim();
+    if (t) REGULARS.push(t);
+  });
+  localStorage.setItem('regulars', JSON.stringify(REGULARS));
+  document.getElementById('regulars-card').classList.add('hidden');
+  alert('✅ רשימת קבועים עודכנה!');
+}
+
+function loadRegulars() {
+  const saved = localStorage.getItem('regulars');
+  if (saved) {
+    const arr = JSON.parse(saved);
+    REGULARS.length = 0;
+    arr.forEach(r => REGULARS.push(r));
+  }
+}
+
+loadRegulars();
+</script>
+</body>
+</html>
